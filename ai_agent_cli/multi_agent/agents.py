@@ -4,6 +4,10 @@ import asyncio
 from typing import Dict, Any, List
 import anthropic
 from .core import SpecializedAgent, AgentRole, Message
+from rich.console import Console
+
+console = Console()
+
 
 class CoordinatorAgent(SpecializedAgent):
     def __init__(self, client: anthropic.Anthropic, message_queue: asyncio.Queue, shared_memory):
@@ -14,6 +18,21 @@ class CoordinatorAgent(SpecializedAgent):
     async def coordinate(self):
         """Main coordination loop"""
         while self.active:
+            # First, if no projects, request research
+            if not self.active_projects:
+                console.print("[yellow]No active projects. Requesting trend analysis...[/yellow]")
+                await self.send_message(
+                    AgentRole.RESEARCHER,
+                    {
+                        "task": "analyze_trends",
+                        "priority": 1,
+                        "context": {
+                            "focus_areas": ["AI", "web3", "developer-tools", "machine-learning"],
+                            "min_stars": 100
+                        }
+                    }
+                )
+            
             # Analyze current state
             state = await self.analyze_system_state()
             
@@ -24,13 +43,17 @@ class CoordinatorAgent(SpecializedAgent):
             for decision in decisions:
                 await self.delegate_task(decision)
             
-            await asyncio.sleep(5)  # Prevent tight loop
+            await asyncio.sleep(30)  # Check every 30 seconds
 
     async def analyze_system_state(self) -> Dict[str, Any]:
         """Analyze current state of all agents and projects"""
+        # Get latest research if available
+        latest_trends = await self.shared_memory.retrieve("latest_trends")
+        
         prompt = f"""Given the current system state:
         Active Projects: {self.active_projects}
         Agent Status: {self.agent_status}
+        Latest Research: {latest_trends if latest_trends else 'None'}
 
         Please analyze:
         1. Current system efficiency
@@ -43,10 +66,55 @@ class CoordinatorAgent(SpecializedAgent):
         analysis = await self.think(prompt)
         return self._parse_analysis(analysis)
 
+    def _parse_analysis(self, response: str) -> Dict[str, Any]:
+        """Parse analysis response into structured data"""
+        try:
+            # Look for specific sections in the response
+            sections = {}
+            current_section = None
+            current_content = []
+
+            for line in response.split('\n'):
+                line = line.strip()
+                if line.startswith('1.'):
+                    current_section = 'efficiency'
+                    current_content = []
+                elif line.startswith('2.'):
+                    sections['efficiency'] = '\n'.join(current_content)
+                    current_section = 'resources'
+                    current_content = []
+                elif line.startswith('3.'):
+                    sections['resources'] = '\n'.join(current_content)
+                    current_section = 'priorities'
+                    current_content = []
+                elif line.startswith('4.'):
+                    sections['priorities'] = '\n'.join(current_content)
+                    current_section = 'bottlenecks'
+                    current_content = []
+                elif line:
+                    current_content.append(line)
+
+            if current_content:
+                sections['bottlenecks'] = '\n'.join(current_content)
+
+            return sections
+        except Exception as e:
+            console.print(f"[red]Error parsing analysis: {str(e)}[/red]")
+            return {
+                "efficiency": "unknown",
+                "resources": [],
+                "priorities": [],
+                "bottlenecks": []
+            }
+
     async def make_strategic_decisions(self, state: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Make strategic decisions based on system state"""
-        prompt = f"""Based on system analysis:
-        {state}
+        # Get latest research
+        latest_trends = await self.shared_memory.retrieve("latest_trends")
+        
+        prompt = f"""Based on:
+        System State: {state}
+        Latest Research: {latest_trends if latest_trends else 'None'}
         
         Determine:
         1. What tasks should be prioritized?
@@ -54,40 +122,41 @@ class CoordinatorAgent(SpecializedAgent):
         3. What agents should be assigned to what tasks?
         4. Are there any urgent interventions needed?
         
-        Provide specific, actionable decisions."""
+        Provide specific, actionable decisions in a structured format."""
         
         decisions = await self.think(prompt)
         return self._parse_decisions(decisions)
 
-    async def delegate_task(self, decision: Dict[str, Any]):
-        """Delegate task to appropriate agent"""
-        await self.send_message(
-            decision["agent_role"],
-            {
-                "task": decision["task"],
-                "priority": decision["priority"],
-                "context": decision["context"]
-            }
-        )
-
-    def _parse_analysis(self, response: str) -> Dict[str, Any]:
-        """Parse analysis response"""
-        # Simple parsing for now - can be enhanced
-        return {
-            "efficiency": "high",
-            "bottlenecks": [],
-            "priorities": []
-        }
-
     def _parse_decisions(self, response: str) -> List[Dict[str, Any]]:
-        """Parse decisions response"""
-        # Simple parsing for now - can be enhanced
-        return [{
-            "agent_role": AgentRole.DEVELOPER,
-            "task": "implement_feature",
-            "priority": 1,
-            "context": {}
-        }]
+        """Parse decisions into actionable tasks"""
+        try:
+            decisions = []
+            current_decision = {}
+            
+            for line in response.split('\n'):
+                line = line.strip()
+                if line.startswith('Task:'):
+                    if current_decision:
+                        decisions.append(current_decision)
+                    current_decision = {'task': line.split(':', 1)[1].strip()}
+                elif line.startswith('Agent:'):
+                    agent_name = line.split(':', 1)[1].strip().lower()
+                    current_decision['agent_role'] = getattr(AgentRole, agent_name, None)
+                elif line.startswith('Priority:'):
+                    try:
+                        current_decision['priority'] = int(line.split(':', 1)[1].strip())
+                    except ValueError:
+                        current_decision['priority'] = 1
+                elif line.startswith('Context:'):
+                    current_decision['context'] = line.split(':', 1)[1].strip()
+            
+            if current_decision:
+                decisions.append(current_decision)
+                
+            return decisions
+        except Exception as e:
+            console.print(f"[red]Error parsing decisions: {str(e)}[/red]")
+            return []
 
 class ArchitectAgent(SpecializedAgent):
     def __init__(self, client, message_queue, shared_memory):
@@ -127,6 +196,7 @@ class ArchitectAgent(SpecializedAgent):
 class ResearcherAgent(SpecializedAgent):
     def __init__(self, client, message_queue, shared_memory):
         super().__init__(client, message_queue, shared_memory, AgentRole.RESEARCHER)
+        self.github_trends = []
         
     async def handle_message(self, message: Message):
         if message.content["task"] == "analyze_trends":
@@ -137,27 +207,80 @@ class ResearcherAgent(SpecializedAgent):
             )
 
     async def analyze_trends(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        prompt = f"""Analyze current trends in:
-        Context: {context}
-        
-        Consider:
-        1. Technical innovations
-        2. Community needs
-        3. Market demands
-        4. Emerging patterns
-        
-        Provide comprehensive analysis."""
-        
-        analysis = await self.think(prompt)
-        return self._parse_analysis(analysis)
+        try:
+            # Analyze GitHub trends
+            async with aiohttp.ClientSession() as session:
+                trends = await fetch_trending_projects(session)
+                self.github_trends = trends
 
-    def _parse_analysis(self, response: str) -> Dict[str, Any]:
-        """Parse analysis response"""
-        return {
-            "trends": [],
-            "recommendations": []
-        }
+                prompt = f"""Given these trending GitHub projects:
+                {json.dumps(trends, indent=2)}
+                
+                Please analyze these trends and suggest 3 innovative project ideas that:
+                1. Build upon these trends
+                2. Solve real problems
+                3. Are technically feasible
+                4. Have potential for impact
+                
+                For each suggestion, provide:
+                - Project name
+                - Problem it solves
+                - Key features
+                - Technical stack
+                - Potential challenges
+                """
+                
+                analysis = await self.think(prompt)
+                
+                # Store findings in shared memory
+                await self.shared_memory.store(
+                    "latest_trends",
+                    {
+                        "trends": trends,
+                        "analysis": analysis,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+                
+                return {
+                    "trends": trends,
+                    "analysis": analysis,
+                    "project_suggestions": self._parse_suggestions(analysis)
+                }
+        except Exception as e:
+            console.print(f"[red]Error in analyze_trends: {str(e)}[/red]")
+            raise
 
+    def _parse_suggestions(self, analysis: str) -> List[Dict[str, Any]]:
+        """Parse project suggestions from the analysis."""
+        try:
+            # Basic parsing - in real implementation, use more robust parsing
+            suggestions = []
+            current_suggestion = {}
+            
+            for line in analysis.split('\n'):
+                line = line.strip()
+                if line.startswith('Project name:'):
+                    if current_suggestion:
+                        suggestions.append(current_suggestion)
+                    current_suggestion = {'name': line.split(':', 1)[1].strip()}
+                elif line.startswith('Problem:'):
+                    current_suggestion['problem'] = line.split(':', 1)[1].strip()
+                elif line.startswith('Features:'):
+                    current_suggestion['features'] = line.split(':', 1)[1].strip()
+                elif line.startswith('Stack:'):
+                    current_suggestion['stack'] = line.split(':', 1)[1].strip()
+                elif line.startswith('Challenges:'):
+                    current_suggestion['challenges'] = line.split(':', 1)[1].strip()
+            
+            if current_suggestion:
+                suggestions.append(current_suggestion)
+                
+            return suggestions
+        except Exception as e:
+            console.print(f"[red]Error parsing suggestions: {str(e)}[/red]")
+            return []
+        
 class DeveloperAgent(SpecializedAgent):
     def __init__(self, client, message_queue, shared_memory):
         super().__init__(client, message_queue, shared_memory, AgentRole.DEVELOPER)

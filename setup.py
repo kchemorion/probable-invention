@@ -1,19 +1,8 @@
-"""Setup configuration for ai-agent-cli package."""
-
 from setuptools import setup, find_packages
-
-with open("README.md", "r", encoding="utf-8") as fh:
-    long_description = fh.read()
 
 setup(
     name="ai-agent-cli",
     version="0.1.0",
-    author="Francis Kiptengwer Chemorion",
-    author_email="kchemorion@gmail.com",
-    description="An autonomous AI agent for project development using Anthropic's Claude",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    url="https://github.com/kchemorion/ai-agent-cli",
     packages=find_packages(),
     install_requires=[
         "anthropic>=0.7.0",
@@ -34,6 +23,12 @@ setup(
             "ai-agent=ai_agent_cli.agent:main",
         ],
     },
+    author="Francis Kiptengwer Chemorion",
+    author_email="kchemorion@gmail.com",
+    description="An autonomous AI agent for project development",
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
+    url="https://github.com/kchemorion/ai-agent-cli",
     classifiers=[
         "Development Status :: 4 - Beta",
         "Environment :: Console",
@@ -47,10 +42,5 @@ setup(
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Topic :: Software Development :: Build Tools",
     ],
-    python_requires=">=3.8",
-    package_data={
-        "ai_agent_cli": ["py.typed"],
-    },
-    include_package_data=True,
-    keywords="ai, agent, automation, development, claude, anthropic",
+    python_requires=">=3.8"
 )

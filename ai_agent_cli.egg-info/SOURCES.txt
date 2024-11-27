@@ -12,3 +12,7 @@ ai_agent_cli.egg-info/dependency_links.txt
 ai_agent_cli.egg-info/entry_points.txt
 ai_agent_cli.egg-info/requires.txt
 ai_agent_cli.egg-info/top_level.txt
+ai_agent_cli/multi_agent/__init__.py
+ai_agent_cli/multi_agent/agents.py
+ai_agent_cli/multi_agent/core.py
+ai_agent_cli/multi_agent/memory.py
