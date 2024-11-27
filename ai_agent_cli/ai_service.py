@@ -1,148 +1,167 @@
-# ai_agent_cli/ai_service.py
+"""Anthropic service integration module."""
+
 import os
-import anthropic
+import re
 from typing import List, Dict, Any
-import asyncio
+import anthropic
 from anthropic import Anthropic
+import json
 
 class AnthropicService:
     def __init__(self, api_key: str = None):
+        """Initialize the Anthropic service."""
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
         if not self.api_key:
             raise ValueError("Anthropic API key is required")
         self.client = Anthropic(api_key=self.api_key)
-        self.model = "claude-3-opus-20240229"  # Using the latest Claude model
+        self.model = "claude-3-sonnet-20240229"
 
-    async def analyze_project_opportunity(self, trend_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Analyze a potential project opportunity using Claude"""
-        prompt = f"""Given this trending repository data:
-        Name: {trend_data['name']}
-        Description: {trend_data['description']}
-        Languages: {trend_data['languages']}
-        Stars: {trend_data['stars']}
+    async def analyze_project_opportunity(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze project opportunities with context."""
+        try:
+            prompt = self._create_analysis_prompt(context)
+            response = self.client.messages.create(
+                messages=[{
+                    "role": "user",
+                    "content": prompt
+                }],
+                model=self.model,
+                max_tokens=2000
+            )
+            return self._parse_structured_response(response.content)
+        except Exception as e:
+            logging.error(f"Error in analyze_project_opportunity: {str(e)}")
+            raise
 
-        Please analyze this trend and suggest a unique project idea that:
-        1. Builds upon this trend but solves a new problem
-        2. Has potential for community interest
-        3. Is technically feasible as an open source project
-        4. Has a clear scope and initial feature set
-
-        Return your response as a structured project proposal with:
-        - Project name
-        - Core problem it solves
-        - Key features
-        - Technical architecture
-        - Potential challenges
-        """
-
+    async def generate_project_code(self, spec: Dict[str, Any], file_path: str) -> str:
+        """Generate code for a specific project file."""
+        prompt = self._create_code_generation_prompt(spec, file_path)
         response = await self.client.messages.create(
             model=self.model,
-            max_tokens=1000,
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }]
+            max_tokens=3000,
+            messages=[{"role": "user", "content": prompt}]
         )
-        
-        return self._parse_project_proposal(response.content)
-
-    async def generate_project_code(self, project_spec: Dict[str, Any], file_path: str) -> str:
-        """Generate code for a specific project file"""
-        prompt = f"""Please generate production-quality code for this file: {file_path}
-        Project Specification:
-        Name: {project_spec['name']}
-        Description: {project_spec['description']}
-        Core Features: {project_spec['features']}
-        
-        Please generate complete, well-documented code following best practices.
-        Include error handling, logging, and appropriate tests.
-        """
-
-        response = await self.client.messages.create(
-            model=self.model,
-            max_tokens=2000,
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }]
-        )
-        
-        return response.content
-
-    async def generate_documentation(self, project_spec: Dict[str, Any], code_files: List[str]) -> str:
-        """Generate comprehensive project documentation"""
-        files_content = "\n".join(code_files)
-        
-        prompt = f"""Please generate comprehensive documentation for this project:
-        Project Name: {project_spec['name']}
-        Description: {project_spec['description']}
-        
-        Code files:
-        {files_content}
-        
-        Generate complete documentation including:
-        1. Project overview
-        2. Installation instructions
-        3. Usage examples
-        4. API reference
-        5. Contributing guidelines
-        """
-
-        response = await self.client.messages.create(
-            model=self.model,
-            max_tokens=2000,
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }]
-        )
-        
-        return response.content
+        return self._extract_code_blocks(response.content)
 
     async def review_code(self, code: str) -> List[Dict[str, Any]]:
-        """Review generated code for improvements"""
-        prompt = f"""Please review this code for:
-        1. Potential bugs
-        2. Security issues
-        3. Performance improvements
-        4. Best practices
-        5. Code style
-
-        Code to review:
-        {code}
-
-        Provide specific, actionable feedback."""
-
+        """Review code and provide structured feedback."""
+        prompt = self._create_code_review_prompt(code)
         response = await self.client.messages.create(
             model=self.model,
-            max_tokens=1000,
-            messages=[{
-                "role": "user",
-                "content": prompt
-            }]
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}]
         )
-        
-        return self._parse_code_review(response.content)
+        return self._parse_review_response(response.content)
 
-    def _parse_project_proposal(self, response: str) -> Dict[str, Any]:
-        """Parse Claude's response into a structured project proposal"""
-        # Implementation would parse the response into a structured format
-        # This is a simplified version
-        return {
-            "name": "Extracted project name",
-            "description": "Extracted description",
-            "features": ["Feature 1", "Feature 2"],
-            "architecture": "Extracted architecture",
-            "challenges": ["Challenge 1", "Challenge 2"]
-        }
+    def _create_analysis_prompt(self, context: Dict[str, Any]) -> str:
+        """Create a detailed prompt for project analysis."""
+        return f"""Given this development context:
+        {json.dumps(context, indent=2)}
 
-    def _parse_code_review(self, response: str) -> List[Dict[str, Any]]:
-        """Parse Claude's code review response into structured feedback"""
-        # Implementation would parse the response into a list of specific issues
-        return [
-            {
-                "type": "bug",
-                "description": "Description of issue",
-                "suggestion": "How to fix it"
+        Please analyze potential project opportunities. Consider:
+        1. Current technology trends
+        2. Market needs and gaps
+        3. Technical feasibility
+        4. Community impact potential
+        5. Resource requirements
+
+        Provide a structured response with:
+        - Project ideas (at least 3)
+        - Technology stack recommendations
+        - Implementation approach
+        - Risk assessment
+        - Success metrics
+
+        Format the response as JSON with clear sections."""
+
+    def _create_code_generation_prompt(self, spec: Dict[str, Any], file_path: str) -> str:
+        """Create a detailed prompt for code generation."""
+        return f"""Generate production-quality code for:
+        File: {file_path}
+        Specification: {json.dumps(spec, indent=2)}
+
+        Requirements:
+        1. Follow Python best practices and PEP standards
+        2. Include comprehensive error handling
+        3. Add detailed docstrings and comments
+        4. Implement logging
+        5. Include type hints
+        6. Add unit tests
+
+        Return the code in clearly marked code blocks."""
+
+    def _create_code_review_prompt(self, code: str) -> str:
+        """Create a detailed prompt for code review."""
+        return f"""Review this code for quality and improvements:
+
+        {code}
+
+        Analyze:
+        1. Code structure and organization
+        2. Error handling and edge cases
+        3. Performance considerations
+        4. Security implications
+        5. Testing coverage
+        6. Documentation quality
+
+        Provide specific, actionable feedback in JSON format."""
+
+    def _parse_structured_response(self, response: str) -> Dict[str, Any]:
+        """Parse Claude's response into structured data."""
+        try:
+            # Look for JSON blocks in the response
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if json_match:
+                return json.loads(json_match.group(0))
+            
+            # Fallback to structured parsing if no JSON found
+            sections = re.split(r'\n(?=\w+:)', response)
+            parsed = {}
+            for section in sections:
+                if ':' in section:
+                    key, value = section.split(':', 1)
+                    parsed[key.strip()] = value.strip()
+            return parsed
+            
+        except Exception as e:
+            return {
+                "error": "Failed to parse response",
+                "raw_response": response,
+                "exception": str(e)
             }
-        ]
+
+    def _extract_code_blocks(self, response: str) -> str:
+        """Extract code blocks from Claude's response."""
+        code_blocks = re.findall(r'```(?:python)?\n([\s\S]*?)\n```', response)
+        if code_blocks:
+            return '\n\n'.join(code_blocks)
+        return response.strip()
+
+    def _parse_review_response(self, response: str) -> List[Dict[str, Any]]:
+        """Parse code review response into structured feedback."""
+        try:
+            # Try to parse as JSON first
+            if '{' in response and '}' in response:
+                json_str = re.search(r'\{[\s\S]*\}', response).group(0)
+                return json.loads(json_str)
+            
+            # Fallback to parsing sections
+            sections = re.split(r'\n(?=\d+\.)', response)
+            feedback = []
+            for section in sections:
+                if section.strip():
+                    matches = re.match(r'(\d+)\.\s+(.*?):\s+(.*)', section.strip())
+                    if matches:
+                        feedback.append({
+                            "id": matches.group(1),
+                            "type": matches.group(2),
+                            "description": matches.group(3)
+                        })
+            return feedback
+            
+        except Exception as e:
+            return [{
+                "type": "error",
+                "description": "Failed to parse review response",
+                "details": str(e)
+            }]

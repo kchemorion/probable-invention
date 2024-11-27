@@ -1,0 +1,2 @@
+[console_scripts]
+ai-agent = ai_agent_cli.agent:main

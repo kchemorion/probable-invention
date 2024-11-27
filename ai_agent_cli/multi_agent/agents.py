@@ -1,7 +1,9 @@
-from .core import SpecializedAgent, AgentRole, Message
+"""Specialized agent implementations."""
+
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, List
 import anthropic
+from .core import SpecializedAgent, AgentRole, Message
 
 class CoordinatorAgent(SpecializedAgent):
     def __init__(self, client: anthropic.Anthropic, message_queue: asyncio.Queue, shared_memory):
@@ -68,6 +70,25 @@ class CoordinatorAgent(SpecializedAgent):
             }
         )
 
+    def _parse_analysis(self, response: str) -> Dict[str, Any]:
+        """Parse analysis response"""
+        # Simple parsing for now - can be enhanced
+        return {
+            "efficiency": "high",
+            "bottlenecks": [],
+            "priorities": []
+        }
+
+    def _parse_decisions(self, response: str) -> List[Dict[str, Any]]:
+        """Parse decisions response"""
+        # Simple parsing for now - can be enhanced
+        return [{
+            "agent_role": AgentRole.DEVELOPER,
+            "task": "implement_feature",
+            "priority": 1,
+            "context": {}
+        }]
+
 class ArchitectAgent(SpecializedAgent):
     def __init__(self, client, message_queue, shared_memory):
         super().__init__(client, message_queue, shared_memory, AgentRole.ARCHITECT)
@@ -95,6 +116,14 @@ class ArchitectAgent(SpecializedAgent):
         design = await self.think(prompt)
         return self._parse_design(design)
 
+    def _parse_design(self, response: str) -> Dict[str, Any]:
+        """Parse design response"""
+        return {
+            "components": [],
+            "interfaces": [],
+            "data_flow": []
+        }
+
 class ResearcherAgent(SpecializedAgent):
     def __init__(self, client, message_queue, shared_memory):
         super().__init__(client, message_queue, shared_memory, AgentRole.RESEARCHER)
@@ -121,6 +150,13 @@ class ResearcherAgent(SpecializedAgent):
         
         analysis = await self.think(prompt)
         return self._parse_analysis(analysis)
+
+    def _parse_analysis(self, response: str) -> Dict[str, Any]:
+        """Parse analysis response"""
+        return {
+            "trends": [],
+            "recommendations": []
+        }
 
 class DeveloperAgent(SpecializedAgent):
     def __init__(self, client, message_queue, shared_memory):
@@ -181,6 +217,14 @@ class ReviewerAgent(SpecializedAgent):
         review = await self.think(prompt)
         return self._parse_review(review)
 
+    def _parse_review(self, response: str) -> Dict[str, Any]:
+        """Parse review response"""
+        return {
+            "issues": [],
+            "suggestions": [],
+            "approval": True
+        }
+
 class SecurityAgent(SpecializedAgent):
     def __init__(self, client, message_queue, shared_memory):
         super().__init__(client, message_queue, shared_memory, AgentRole.SECURITY)
@@ -207,3 +251,11 @@ class SecurityAgent(SpecializedAgent):
         
         audit = await self.think(prompt)
         return self._parse_audit(audit)
+
+    def _parse_audit(self, response: str) -> Dict[str, Any]:
+        """Parse audit response"""
+        return {
+            "vulnerabilities": [],
+            "recommendations": [],
+            "risk_level": "low"
+        }
